@@ -36,6 +36,7 @@ courier --help
 ## Commands
 
 ```text
+courier commander [NAME] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
 courier create <NAME> [--role commander|worker|none] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
 courier inject <NAME_OR_PANE_OR_TERMINAL_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000]
 courier watch <TARGET_NAME_OR_ID> [--watcher NAME_OR_ID]
@@ -47,10 +48,16 @@ courier suspend <NAME_OR_PANE_OR_TERMINAL_ID>
 
 ## Basic flow
 
-Create a commander:
+Create a default commander:
 
 ```bash
-courier create commander --role commander --agent claude
+courier commander
+```
+
+This launches a commander named `commander` using Claude Code by default. Override the name or agent if needed:
+
+```bash
+courier commander project-lead --agent pi
 ```
 
 Create a worker:

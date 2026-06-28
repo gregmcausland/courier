@@ -16,7 +16,8 @@ try {
 
   const runtime = new CourierRuntime();
   switch (command.kind) {
-    case "create": printJson(runtime.create(command.options)); break;
+    case "create":
+    case "commander": printJson(runtime.create(command.options)); break;
     case "inject": runtime.inject(command.target, command.text, command.submitDelayMs, command.pollMs); break;
     case "watch": printJson(runtime.watch(command.target, command.watcher)); break;
     case "complete": printJson(runtime.complete(command.target, command.message)); break;
