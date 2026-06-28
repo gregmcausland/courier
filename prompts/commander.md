@@ -27,7 +27,7 @@ For one delegated task, use this sequence:
 ### Watches and delivery (read this — easy to get wrong)
 
 - **Watches are one-shot**, consumed by the worker's `complete`. If you inject a *second* task into a worker you already collected from, you **must `watch` it again first** — otherwise its completion has no watcher. (A missed completion is now buffered and a later `watch` will recover it, but don't rely on that; re-arm up front.)
-- A worker completes as **itself**: `{{courier}} complete <that-worker's-name>`. The name is the completer, not the recipient — never tell a worker to `complete {{name}}`.
+- A worker completes against **its own pane** by default: `{{courier}} complete --message "..."` (no name). Never tell a worker to `complete {{name}}` — naming you misroutes the result.
 - **Flush before idling.** A completion that lands while you are busy is queued, not injected, and only delivers on the next drain. After injecting dependent work, kick off a detached drain of your own queue so anything buffered while you were busy arrives once you go idle:
 
 ```bash

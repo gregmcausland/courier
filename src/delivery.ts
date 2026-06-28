@@ -6,7 +6,7 @@ import { sleep } from "./util.js";
 export class DeliveryPump {
   constructor(private herdr: HerdrAdapter, private store: CourierStore, private resolveTarget: (target: string) => ReturnType<HerdrAdapter["resolve"]>) {}
 
-  injectText(target: string, text: string, submitDelayMs = 750, pollMs = 1000, timeoutMs = 60000): void {
+  injectText(target: string, text: string, submitDelayMs = 750, pollMs = 1000, timeoutMs = 10000): void {
     const pane = this.herdr.waitUntilInjectable(() => this.resolveTarget(target), target, pollMs, timeoutMs);
     this.herdr.sendText(pane.pane_id, text);
     sleep(submitDelayMs);

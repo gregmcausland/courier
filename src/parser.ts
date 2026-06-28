@@ -7,7 +7,7 @@ export type Command =
   | { kind: "commander"; options: CreateOptions }
   | { kind: "inject"; target: string; text: string; submitDelayMs: number; pollMs: number }
   | { kind: "watch"; target: string; watcher?: string }
-  | { kind: "complete"; target: string; message: string }
+  | { kind: "complete"; target?: string; message: string }
   | { kind: "deliver"; target: string }
   | { kind: "close" | "suspend"; target: string }
   | { kind: "debug-list" };
@@ -18,7 +18,7 @@ export function usage(): string {
   courier create <NAME> [--role commander|worker|none] [--type triage] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
   courier inject <NAME_OR_PANE_OR_TERMINAL_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000]
   courier watch <TARGET_NAME_OR_ID> [--watcher NAME_OR_ID]
-  courier complete <TARGET_NAME_OR_ID> --message TEXT
+  courier complete [TARGET_NAME_OR_ID] --message TEXT   (target defaults to the calling pane)
   courier deliver <NAME_OR_PANE_OR_TERMINAL_ID>
   courier close <NAME_OR_PANE_OR_TERMINAL_ID>
   courier suspend <NAME_OR_PANE_OR_TERMINAL_ID>
@@ -109,8 +109,11 @@ function parseWatchArgs(args: string[]): { target: string; watcher?: string } {
   return { target, watcher };
 }
 
-function parseCompleteArgs(args: string[]): { target: string; message: string } {
-  const target = requireValue(args.shift(), "target name or id"); let message: string | undefined;
+function parseCompleteArgs(args: string[]): { target?: string; message: string } {
+  // Target is optional and defaults to the calling pane. A leading positional
+  // (not starting with --) is treated as an explicit completer.
+  let target: string | undefined; let message: string | undefined;
+  if (args[0] && !args[0].startsWith("--")) target = args.shift();
   while (args.length > 0) { const arg = args.shift(); if (arg === "--message") message = requireValue(args.shift(), "--message value"); else throw new Error(`unknown option: ${arg ?? ""}`); }
   if (!message) throw new Error("missing --message");
   return { target, message };

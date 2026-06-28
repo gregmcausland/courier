@@ -51,7 +51,7 @@ export class HerdrAdapter {
 
   focusedPane(): Pane | undefined { return this.listPanes().find((pane) => pane.focused); }
 
-  waitUntilInjectable(resolve: () => Pane | undefined, targetLabel: string, pollMs: number, timeoutMs = 60000): Pane {
+  waitUntilInjectable(resolve: () => Pane | undefined, targetLabel: string, pollMs: number, timeoutMs = 10000): Pane {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const pane = resolve();

@@ -31,6 +31,20 @@ export class CourierRuntime {
     return focused;
   }
 
+  // The pane running this command. Herdr exports HERDR_PANE_ID into each pane,
+  // so a worker calling `complete` resolves to itself reliably (the focused pane
+  // is whatever the human is looking at, which is usually not the caller).
+  selfPane(): Pane {
+    const paneId = process.env.HERDR_PANE_ID;
+    const pane = (paneId ? this.herdr.resolve(paneId) : undefined) ?? this.herdr.focusedPane();
+    if (!pane) throw new Error("could not determine the calling pane (HERDR_PANE_ID unset and no focused pane)");
+    return pane;
+  }
+
+  selfTerminal(): string {
+    return this.selfPane().terminal_id ?? fail("calling pane has no terminal_id");
+  }
+
   create(opts: CreateOptions): CreateResult {
     const requestedSource = opts.from ? (this.resolveTarget(opts.from) ?? fail(`source is gone or unavailable: ${opts.from}`)) : this.focusedPane();
     const pane = opts.here ? requestedSource : this.placement.createPane(opts, requestedSource);
@@ -50,7 +64,7 @@ export class CourierRuntime {
 
   watch(target: string, watcher?: string): { awaiting: string; watcher: string; mode: "once"; recovered: number } {
     const targetTerminal = this.terminalIdFor(target);
-    const watcherTerminal = watcher ? this.terminalIdFor(watcher) : (this.focusedPane().terminal_id ?? fail("focused pane has no terminal_id"));
+    const watcherTerminal = watcher ? this.terminalIdFor(watcher) : this.selfTerminal();
     this.store.registerWatch(targetTerminal, watcherTerminal);
     // Self-heal: if the target already completed while no watch was armed, its
     // completion was buffered under its own terminal. Re-key it to this watcher
@@ -63,8 +77,8 @@ export class CourierRuntime {
     return { awaiting: targetTerminal, watcher: watcherTerminal, mode: "once", recovered };
   }
 
-  complete(target: string, message: string): { target: string; queued: number; delivered: number; consumed: number; buffered: number } {
-    const targetTerminal = this.terminalIdFor(target);
+  complete(target: string | undefined, message: string): { target: string; queued: number; delivered: number; consumed: number; buffered: number } {
+    const targetTerminal = target ? this.terminalIdFor(target) : this.selfTerminal();
     const watchers = this.store.consumeWatchers(targetTerminal);
     const createdAt = new Date().toISOString();
     for (const watcherTerminal of watchers) this.delivery.enqueueCompletion(watcherTerminal, targetTerminal, message, createdAt);
