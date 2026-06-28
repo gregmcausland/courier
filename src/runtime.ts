@@ -37,31 +37,43 @@ export class CourierRuntime {
     if (!pane.pane_id || !pane.terminal_id) throw new Error("herdr create did not return pane_id and terminal_id");
 
     this.herdr.renamePane(pane.pane_id, opts.name);
-    const promptPath = this.store.writePromptFile(opts.name, rolePrompt(opts.role, opts.name));
+    const promptPath = this.store.writePromptFile(opts.name, rolePrompt(opts.role, opts.name, opts.type));
     this.herdr.runInPane(pane.pane_id, agentCommand(opts.agent, opts.name, promptPath));
     this.herdr.renameAgent(pane.terminal_id, opts.name);
 
     const settledPane = this.herdr.waitForAgentSession(pane.terminal_id) ?? pane;
-    this.store.addAgent({ name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, role: opts.role, agentSession: settledPane.agent_session, createdAt: new Date().toISOString() });
-    return { name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, role: opts.role, agentSession: settledPane.agent_session };
+    this.store.addAgent({ name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, role: opts.role, type: opts.type, agentSession: settledPane.agent_session, createdAt: new Date().toISOString() });
+    return { name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, role: opts.role, type: opts.type, agentSession: settledPane.agent_session };
   }
 
   inject(target: string, text: string, submitDelayMs?: number, pollMs?: number): void { this.delivery.injectText(target, text, submitDelayMs, pollMs); }
 
-  watch(target: string, watcher?: string): { awaiting: string; watcher: string; mode: "once" } {
+  watch(target: string, watcher?: string): { awaiting: string; watcher: string; mode: "once"; recovered: number } {
     const targetTerminal = this.terminalIdFor(target);
     const watcherTerminal = watcher ? this.terminalIdFor(watcher) : (this.focusedPane().terminal_id ?? fail("focused pane has no terminal_id"));
     this.store.registerWatch(targetTerminal, watcherTerminal);
-    return { awaiting: targetTerminal, watcher: watcherTerminal, mode: "once" };
+    // Self-heal: if the target already completed while no watch was armed, its
+    // completion was buffered under its own terminal. Re-key it to this watcher
+    // and consume the watch we just registered so it behaves like a normal delivery.
+    let recovered = 0;
+    if (this.delivery.redeliverPending(targetTerminal, watcherTerminal) > 0) {
+      this.store.consumeWatchers(targetTerminal);
+      recovered = this.delivery.drain(watcherTerminal);
+    }
+    return { awaiting: targetTerminal, watcher: watcherTerminal, mode: "once", recovered };
   }
 
-  complete(target: string, message: string): { target: string; queued: number; delivered: number; consumed: number } {
+  complete(target: string, message: string): { target: string; queued: number; delivered: number; consumed: number; buffered: number } {
     const targetTerminal = this.terminalIdFor(target);
     const watchers = this.store.consumeWatchers(targetTerminal);
     const createdAt = new Date().toISOString();
     for (const watcherTerminal of watchers) this.delivery.enqueueCompletion(watcherTerminal, targetTerminal, message, createdAt);
     const delivered = [...new Set(watchers)].reduce((sum, watcherTerminal) => sum + this.delivery.drain(watcherTerminal), 0);
-    return { target: targetTerminal, queued: watchers.length, delivered, consumed: watchers.length };
+    // No live watcher: buffer the completion under this terminal so it is never
+    // silently lost. A later `watch` on this target will pick it up.
+    let buffered = 0;
+    if (watchers.length === 0) { this.delivery.bufferCompletion(targetTerminal, message, createdAt); buffered = 1; }
+    return { target: targetTerminal, queued: watchers.length, delivered, consumed: watchers.length, buffered };
   }
 
   deliver(target: string): { target: string; delivered: number; queued: number } {
@@ -93,6 +105,7 @@ export class CourierRuntime {
         status: current?.agent_status ?? "gone",
         agent: current ? record.agent : null,
         role: record.role ?? null,
+        type: record.type ?? null,
         agentSession: current?.agent_session ?? record.agentSession ?? null,
         closedAt: record.closedAt ?? null,
       };

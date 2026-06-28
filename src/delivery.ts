@@ -23,6 +23,25 @@ export class DeliveryPump {
     });
   }
 
+  // Persist a completion that has no live watcher, keyed under the completer's own
+  // terminal, so a watcher arming late can still pick it up. Without this, a
+  // completion fired while no watch is armed evaporates with no record.
+  bufferCompletion(self: string, message: string, createdAt: string): void {
+    this.enqueueCompletion(self, self, message, createdAt);
+  }
+
+  // Re-key any completions buffered under `from` so they are delivered to `to`,
+  // then return how many were moved. Used when a watch arms after the worker has
+  // already completed.
+  redeliverPending(from: string, to: string): number {
+    const pending = this.store.readDeliveries(from).filter((delivery) => delivery.from === from);
+    for (const delivery of pending) {
+      this.store.enqueueDelivery({ ...delivery, to, id: `${delivery.id}_redeliver_${Math.random().toString(16).slice(2)}` });
+      this.store.removeDelivery(delivery);
+    }
+    return pending.length;
+  }
+
   drain(to: string, submitDelayMs = 750, pollMs = 1000): number {
     let delivered = 0;
     this.store.withLock(`deliver-${to}`, () => {

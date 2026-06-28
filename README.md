@@ -88,6 +88,10 @@ courier complete worker-1 --message '4'
 
 Courier consumes the watch and delivers a structured completion notification to the watcher.
 
+## Commander prompt
+
+Prompt source templates live as Markdown files under `prompts/`. `courier commander` renders those templates into `.courier/prompts/<name>.md` and launches the commander with that file attached. The commander template is intentionally a small stub: it names the Courier command, explains the create/watch/inject delegation sequence, and tells the commander to return idle after fan-out so completions can be delivered safely.
+
 ## Delivery model
 
 Completions are queued under `.courier/deliveries/` and drained with a per-watcher lock. This prevents concurrent fan-in completions from being pasted into the same input buffer.
@@ -105,7 +109,7 @@ Courier stores project-local state in `.courier/`:
 ```text
 .courier/
   state.json
-  prompts/
+  prompts/       # rendered Markdown prompt files
   deliveries/
   locks/
 ```

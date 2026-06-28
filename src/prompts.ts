@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Role } from "./types.js";
+import type { Role, WorkerType } from "./types.js";
 import { shellQuote } from "./util.js";
 
 export function defaultRole(name: string): Role {
@@ -9,12 +10,32 @@ export function defaultRole(name: string): Role {
   return "none";
 }
 
-export function rolePrompt(role: Role, name: string): string {
-  const courier = courierInvocation();
-  const base = `COURIER NAME: ${name}. IMPORTANT: If you receive a [courier request], do the task and finish by running: ${courier} complete ${name} --message "<result>". IMPORTANT: If you receive [courier complete], it is a result notification only. DO NOT call complete in response to [courier complete].`;
-  if (role === "commander") return `${base} COMMANDER: To delegate, run: ${courier} create <worker-name>; ${courier} watch <worker-name> --watcher ${name}; ${courier} inject <worker-name> --text "[courier request] <task>". After injecting one dependent task, STOP and return idle.`;
-  if (role === "worker") return `${base} WORKER: Do not message commanders directly; use complete.`;
-  return base;
+export const knownWorkerTypes = ["triage"] as const satisfies readonly WorkerType[];
+
+export function isKnownWorkerType(value: string): value is WorkerType {
+  return (knownWorkerTypes as readonly string[]).includes(value);
+}
+
+export function rolePrompt(role: Role, name: string, type?: WorkerType): string {
+  if (type && !isKnownWorkerType(type)) throw new Error(`unknown worker type: ${type}. Known worker types: ${knownWorkerTypes.join(", ")}`);
+  if (type && role !== "worker") throw new Error(`worker type ${type} requires role worker`);
+
+  const context = { name, courier: courierInvocation() };
+  const parts = [renderTemplate("base.md", context)];
+  if (role === "commander") parts.push(renderTemplate("commander.md", context));
+  if (role === "worker") parts.push(renderTemplate("worker.md", context));
+  if (type) parts.push(renderTemplate(join("types", `${type}.md`), context));
+  return parts.join("\n\n");
+}
+
+function renderTemplate(file: string, values: Record<string, string>): string {
+  let template = readFileSync(join(templateDir(), file), "utf8");
+  for (const [key, value] of Object.entries(values)) template = template.replaceAll(`{{${key}}}`, value);
+  return template.trim();
+}
+
+function templateDir(): string {
+  return join(dirname(dirname(fileURLToPath(import.meta.url))), "prompts");
 }
 
 function courierInvocation(): string {

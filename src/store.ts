@@ -72,7 +72,7 @@ export class CourierStore {
 
   writePromptFile(name: string, prompt: string): string {
     mkdirSync(this.promptDir, { recursive: true });
-    const path = join(this.promptDir, `${safeFilePart(name)}.txt`);
+    const path = join(this.promptDir, `${safeFilePart(name)}.md`);
     writeFileSync(path, `${prompt}\n`);
     return path;
   }

@@ -1,5 +1,5 @@
-import type { CreateOptions, Role } from "./types.js";
-import { defaultRole } from "./prompts.js";
+import type { CreateOptions, Role, WorkerType } from "./types.js";
+import { defaultRole, isKnownWorkerType, knownWorkerTypes } from "./prompts.js";
 
 export type Command =
   | { kind: "help" }
@@ -15,7 +15,7 @@ export type Command =
 export function usage(): string {
   return `Usage:
   courier commander [NAME] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
-  courier create <NAME> [--role commander|worker|none] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
+  courier create <NAME> [--role commander|worker|none] [--type triage] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
   courier inject <NAME_OR_PANE_OR_TERMINAL_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000]
   courier watch <TARGET_NAME_OR_ID> [--watcher NAME_OR_ID]
   courier complete <TARGET_NAME_OR_ID> --message TEXT
@@ -66,12 +66,13 @@ function parseCommanderArgs(args: string[]): CreateOptions {
 
 function parseCreateArgs(args: string[]): CreateOptions {
   const name = requireValue(args.shift(), "name");
-  let from: string | undefined; let tab = false; let agent = "pi"; let role: Role = defaultRole(name); const tail: string[] = [];
+  let from: string | undefined; let tab = false; let agent = "pi"; let role: Role = defaultRole(name); let explicitRole: Role | undefined; let type: WorkerType | undefined; const tail: string[] = [];
   while (args.length > 0) {
     const arg = args.shift();
     switch (arg) {
       case "--agent": agent = requireValue(args.shift(), "--agent value"); break;
-      case "--role": { const value = requireValue(args.shift(), "--role value"); if (value !== "commander" && value !== "worker" && value !== "none") throw new Error("--role must be commander, worker, or none"); role = value; break; }
+      case "--role": { const value = requireValue(args.shift(), "--role value"); if (value !== "commander" && value !== "worker" && value !== "none") throw new Error("--role must be commander, worker, or none"); role = value; explicitRole = value; break; }
+      case "--type": { const value = requireValue(args.shift(), `--type value (${knownWorkerTypes.join("|")})`); if (!isKnownWorkerType(value)) throw new Error(`--type must be one of: ${knownWorkerTypes.join(", ")}`); type = value; break; }
       case "--from": from = requireValue(args.shift(), "--from value"); break;
       case "--tab": tab = true; break;
       case "--cwd": tail.push("--cwd", requireValue(args.shift(), "--cwd value")); break;
@@ -80,7 +81,11 @@ function parseCreateArgs(args: string[]): CreateOptions {
       default: throw new Error(`unknown option: ${arg ?? ""}`);
     }
   }
-  return { name, from, tab, tail, agent, role };
+  if (type) {
+    if (explicitRole && explicitRole !== "worker") throw new Error("--type requires --role worker; remove the conflicting --role or use --role worker");
+    role = "worker";
+  }
+  return { name, from, tab, tail, agent, role, type };
 }
 
 function parseInjectArgs(args: string[]): { target: string; text: string; submitDelayMs: number; pollMs: number } {
