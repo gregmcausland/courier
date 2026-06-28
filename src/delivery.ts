@@ -1,13 +1,13 @@
 import type { Delivery } from "./types.js";
-import { HerdrAdapter } from "./herdr.js";
+import { HerdrAdapter, InjectionReadinessTimeout } from "./herdr.js";
 import { CourierStore } from "./store.js";
 import { sleep } from "./util.js";
 
 export class DeliveryPump {
   constructor(private herdr: HerdrAdapter, private store: CourierStore, private resolveTarget: (target: string) => ReturnType<HerdrAdapter["resolve"]>) {}
 
-  injectText(target: string, text: string, submitDelayMs = 750, pollMs = 1000): void {
-    const pane = this.herdr.waitUntilInjectable(() => this.resolveTarget(target), target, pollMs);
+  injectText(target: string, text: string, submitDelayMs = 750, pollMs = 1000, timeoutMs = 60000): void {
+    const pane = this.herdr.waitUntilInjectable(() => this.resolveTarget(target), target, pollMs, timeoutMs);
     this.herdr.sendText(pane.pane_id, text);
     sleep(submitDelayMs);
     this.herdr.submit(pane.pane_id);
@@ -29,7 +29,15 @@ export class DeliveryPump {
       for (;;) {
         const next = this.store.readDeliveries(to)[0];
         if (!next) break;
-        this.injectText(to, next.text, submitDelayMs, pollMs);
+        try {
+          this.injectText(to, next.text, submitDelayMs, pollMs);
+        } catch (error) {
+          if (error instanceof InjectionReadinessTimeout) {
+            if (delivered === 0) process.stderr.write(`${error.message}\n`);
+            break;
+          }
+          throw error;
+        }
         this.store.removeDelivery(next);
         delivered += 1;
         sleep(pollMs);

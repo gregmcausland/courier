@@ -6,6 +6,10 @@ type PaneListResponse = { result?: { panes?: Pane[] } };
 type PaneInfoResponse = { result?: { pane?: Pane; root_pane?: Pane; agent?: Pane } };
 type HerdrResult = { status: number; stdout: string; stderr: string };
 
+export class InjectionReadinessTimeout extends Error {
+  constructor(targetLabel: string) { super(`target did not become injectable before timeout: ${targetLabel}`); }
+}
+
 export class HerdrAdapter {
   raw(args: string[]): HerdrResult {
     const result = spawnSync("herdr", args, { encoding: "utf8", shell: false });
@@ -47,12 +51,15 @@ export class HerdrAdapter {
 
   focusedPane(): Pane | undefined { return this.listPanes().find((pane) => pane.focused); }
 
-  waitUntilInjectable(resolve: () => Pane | undefined, targetLabel: string, pollMs: number): Pane {
+  waitUntilInjectable(resolve: () => Pane | undefined, targetLabel: string, pollMs: number, timeoutMs = 60000): Pane {
+    const deadline = Date.now() + timeoutMs;
     for (;;) {
       const pane = resolve();
       if (!pane) throw new Error(`target is gone or unavailable: ${targetLabel}`);
-      if (pane.agent_status === "idle" || pane.agent_status === "done") return pane;
-      sleep(pollMs);
+      const plainTerminal = !pane.agent_session && !pane.agent;
+      if (pane.agent_status === "idle" || pane.agent_status === "done" || (!pane.agent_status && plainTerminal)) return pane;
+      if (Date.now() >= deadline) throw new InjectionReadinessTimeout(targetLabel);
+      sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
     }
   }
 
