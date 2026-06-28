@@ -4,5 +4,5 @@ export type Role = "commander" | "worker" | "none";
 export type AgentRecord = { name: string; terminalId: string; paneId: string; agent: string; role?: Role; agentSession?: AgentSessionRef; createdAt: string; closedAt?: string };
 export type State = { version: 1; agents: Record<string, AgentRecord>; watches: Record<string, string[]> };
 export type Delivery = { id: string; to: string; from: string; text: string; createdAt: string };
-export type CreateOptions = { name: string; from?: string; tab: boolean; tail: string[]; agent: string; role: Role };
+export type CreateOptions = { name: string; from?: string; tab: boolean; here?: boolean; tail: string[]; agent: string; role: Role };
 export type CreateResult = { name: string; terminalId: string; paneId: string; agent: string; role: Role; agentSession?: AgentSessionRef };

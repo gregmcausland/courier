@@ -16,7 +16,7 @@ Defaults:
 - name: `commander`
 - role: `commander`
 - agent: `claude`
-- placement: split in the current tab unless `--tab` is passed
+- placement: current pane unless `--tab` is passed
 
 Examples:
 

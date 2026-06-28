@@ -54,7 +54,7 @@ Create a default commander:
 courier commander
 ```
 
-This launches a commander named `commander` using Claude Code by default. Override the name or agent if needed:
+This launches a commander named `commander` using Claude Code in the current pane by default. Pass `--tab` only when you want a discrete tab. Override the name or agent if needed:
 
 ```bash
 courier commander project-lead --agent pi

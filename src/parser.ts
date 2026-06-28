@@ -23,7 +23,7 @@ export function usage(): string {
   courier close <NAME_OR_PANE_OR_TERMINAL_ID>
   courier suspend <NAME_OR_PANE_OR_TERMINAL_ID>
 
-Courier records created agents by name. courier commander launches a default commander named commander with Claude Code unless overridden. Worker creates are contained in a shared worker tab by default; pass --tab to open a discrete tab. Watches are one-shot awaits consumed by complete.
+Courier records created agents by name. courier commander launches a default commander named commander with Claude Code in the current pane unless --tab is passed. Worker creates are contained in a shared worker tab by default; pass --tab to open a discrete tab. Watches are one-shot awaits consumed by complete.
 Default worker agent: pi. Use --agent claude for Claude Code or --agent cursor for Cursor Agent.
 `;
 }
@@ -61,7 +61,7 @@ function parseCommanderArgs(args: string[]): CreateOptions {
       default: throw new Error(`unknown option: ${arg ?? ""}`);
     }
   }
-  return { name, from, tab, tail, agent, role: "commander" };
+  return { name, from, tab, here: !tab, tail, agent, role: "commander" };
 }
 
 function parseCreateArgs(args: string[]): CreateOptions {

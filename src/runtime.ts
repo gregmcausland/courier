@@ -33,7 +33,7 @@ export class CourierRuntime {
 
   create(opts: CreateOptions): CreateResult {
     const requestedSource = opts.from ? (this.resolveTarget(opts.from) ?? fail(`source is gone or unavailable: ${opts.from}`)) : this.focusedPane();
-    const pane = this.placement.createPane(opts, requestedSource);
+    const pane = opts.here ? requestedSource : this.placement.createPane(opts, requestedSource);
     if (!pane.pane_id || !pane.terminal_id) throw new Error("herdr create did not return pane_id and terminal_id");
 
     this.herdr.renamePane(pane.pane_id, opts.name);
