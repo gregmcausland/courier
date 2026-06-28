@@ -1,0 +1,19 @@
+{
+  "name": "courier",
+  "version": "0.0.1",
+  "private": false,
+  "type": "module",
+  "description": "A Herdr-based coordination CLI for terminal AI agents.",
+  "bin": {
+    "courier": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "start": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

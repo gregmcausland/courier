@@ -1,0 +1,115 @@
+# Courier
+
+Courier is a small TypeScript CLI for coordinating Herdr-managed AI agent panes.
+
+It lets you create named commander/worker agents, inject prompts safely, register one-shot watches, and route worker completions back to watchers through a serialized delivery queue.
+
+## Status
+
+Early MVP. Built for local experimentation with [Herdr](https://github.com/) and terminal-native agents.
+
+Supported agent launchers:
+
+- `pi` — default
+- `claude` — Claude Code live session with `--dangerously-skip-permissions`
+- `cursor` — Cursor Agent bootstrap prompt
+
+## Install / build
+
+```bash
+npm install
+npm run build
+```
+
+Run locally:
+
+```bash
+node dist/cli.js --help
+```
+
+Or via npm bin after linking/installing:
+
+```bash
+courier --help
+```
+
+## Commands
+
+```text
+courier create <NAME> [--role commander|worker|none] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
+courier inject <NAME_OR_PANE_OR_TERMINAL_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000]
+courier watch <TARGET_NAME_OR_ID> [--watcher NAME_OR_ID]
+courier complete <TARGET_NAME_OR_ID> --message TEXT
+courier deliver <NAME_OR_PANE_OR_TERMINAL_ID>
+courier close <NAME_OR_PANE_OR_TERMINAL_ID>
+courier suspend <NAME_OR_PANE_OR_TERMINAL_ID>
+```
+
+## Basic flow
+
+Create a commander:
+
+```bash
+courier create commander --role commander --agent claude
+```
+
+Create a worker:
+
+```bash
+courier create worker-1 --role worker
+```
+
+Workers are contained in a shared worker tab by default. Use `--tab` to request a discrete tab.
+
+Register a one-shot watch:
+
+```bash
+courier watch worker-1 --watcher commander
+```
+
+Send a request:
+
+```bash
+courier inject worker-1 --text '[courier request] Answer: what is 2 + 2?'
+```
+
+The worker should finish by running:
+
+```bash
+courier complete worker-1 --message '4'
+```
+
+Courier consumes the watch and delivers a structured completion notification to the watcher.
+
+## Delivery model
+
+Completions are queued under `.courier/deliveries/` and drained with a per-watcher lock. This prevents concurrent fan-in completions from being pasted into the same input buffer.
+
+If needed, manually drain pending notifications:
+
+```bash
+courier deliver commander
+```
+
+## Local state
+
+Courier stores project-local state in `.courier/`:
+
+```text
+.courier/
+  state.json
+  prompts/
+  deliveries/
+  locks/
+```
+
+This directory is ignored by git.
+
+## Development
+
+```bash
+npm run check
+npm run build
+```
+
+See `SPEC.md` for design notes and MVP rationale.
