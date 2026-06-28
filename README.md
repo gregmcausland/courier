@@ -105,6 +105,18 @@ Courier stores project-local state in `.courier/`:
 
 This directory is ignored by git.
 
+## Architecture
+
+Courier is split into small, deeper modules:
+
+- `CourierRuntime` coordinates the core flows.
+- `HerdrAdapter` contains Herdr CLI calls and response parsing.
+- `CourierStore` owns `.courier/` state, deliveries, prompts, and locks.
+- `DeliveryPump` serializes completion delivery to watcher agents.
+- `PlacementPlanner` owns split/tab placement policy.
+- `prompts.ts` owns the Courier prompt contract.
+- `parser.ts` turns CLI argv into typed command intents.
+
 ## Development
 
 ```bash
@@ -112,4 +124,4 @@ npm run check
 npm run build
 ```
 
-See `SPEC.md` for design notes and MVP rationale.
+See `SPEC.md` and `CONTEXT.md` for design notes, domain vocabulary, and MVP rationale.
