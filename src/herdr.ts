@@ -56,8 +56,12 @@ export class HerdrAdapter {
     for (;;) {
       const pane = resolve();
       if (!pane) throw new Error(`target is gone or unavailable: ${targetLabel}`);
+      // A plain terminal (no agent) has no agent to be "busy", so it is injectable
+      // whenever Herdr reports no meaningful agent status — which for a bare shell
+      // is the literal "unknown", not an empty string.
       const plainTerminal = !pane.agent_session && !pane.agent;
-      if (pane.agent_status === "idle" || pane.agent_status === "done" || (!pane.agent_status && plainTerminal)) return pane;
+      const plainReady = plainTerminal && (!pane.agent_status || pane.agent_status === "unknown");
+      if (pane.agent_status === "idle" || pane.agent_status === "done" || plainReady) return pane;
       if (Date.now() >= deadline) throw new InjectionReadinessTimeout(targetLabel);
       sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
     }
@@ -74,20 +78,20 @@ export class HerdrAdapter {
   }
 
   createTab(workspaceId: string, label: string, tail: string[]): Pane {
-    const pane = this.parsePaneInfo(this.run(["tab", "create", "--workspace", workspaceId, "--label", label, ...tail]));
+    const pane = this.parsePaneInfo(this.run(["tab", "create", "--workspace", workspaceId, "--label", label, ...tail], false));
     if (!pane) throw new Error("herdr tab create did not return a pane");
     return pane;
   }
 
   splitPane(paneId: string, tail: string[]): Pane {
-    const pane = this.parsePaneInfo(this.run(["pane", "split", paneId, "--direction", "right", ...tail]));
+    const pane = this.parsePaneInfo(this.run(["pane", "split", paneId, "--direction", "right", ...tail], false));
     if (!pane) throw new Error("herdr pane split did not return a pane");
     return pane;
   }
 
   renamePane(paneId: string, name: string): void { this.run(["pane", "rename", paneId, name], false); }
   renameAgent(terminalId: string, name: string): void { this.run(["agent", "rename", terminalId, name], false); }
-  runInPane(paneId: string, command: string): void { this.run(["pane", "run", paneId, command]); }
+  runInPane(paneId: string, command: string): void { this.run(["pane", "run", paneId, command], false); }
   sendText(paneId: string, text: string): void { this.run(["pane", "send-text", paneId, text], false); }
   submit(paneId: string): void { this.run(["pane", "send-keys", paneId, "Enter"], false); }
   closePane(paneId: string): void { this.run(["pane", "close", paneId], false); }

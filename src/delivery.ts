@@ -1,7 +1,7 @@
 import type { Delivery } from "./types.js";
 import { HerdrAdapter, InjectionReadinessTimeout } from "./herdr.js";
 import { CourierStore } from "./store.js";
-import { sleep } from "./util.js";
+import { isAwaitWatcher, sleep } from "./util.js";
 
 export class DeliveryPump {
   constructor(private herdr: HerdrAdapter, private store: CourierStore, private resolveTarget: (target: string) => ReturnType<HerdrAdapter["resolve"]>) {}
@@ -18,7 +18,10 @@ export class DeliveryPump {
       id: `${createdAt}_${process.pid}_${Math.random().toString(16).slice(2)}`,
       to,
       from,
-      text: `[courier complete]\ntarget: ${from}\n\n${message}`,
+      // `text` is the pane-injectable notification; `message` is the raw reply,
+      // kept so `request --await` can return it unwrapped on stdout.
+      text: `[courier respond]\nfrom: ${from}\n\n${message}`,
+      message,
       createdAt,
     });
   }
@@ -43,6 +46,9 @@ export class DeliveryPump {
   }
 
   drain(to: string, submitDelayMs = 750, pollMs = 1000): number {
+    // Await watchers are synthetic (no pane); their queue is drained in-process by
+    // `request --await`, never injected. Skip so we don't try to resolve a pane.
+    if (isAwaitWatcher(to)) return 0;
     let delivered = 0;
     this.store.withLock(`deliver-${to}`, () => {
       for (;;) {

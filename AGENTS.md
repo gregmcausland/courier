@@ -1,48 +1,41 @@
 # Courier Agent Instructions
 
-When working in this repository, use Courier to coordinate terminal agents through Herdr.
+When working in this repository, use Courier to coordinate terminal agents through Herdr. Panes are homogeneous — any pane can create panes, request work from any other pane, and respond.
 
-## Launch a commander
+## Launch an agent
 
-Use the baked-in shortcut:
+`commander` is a convenience launcher (Claude Code in the current pane, no special role):
 
 ```bash
 npm run build
 node dist/cli.js commander
 ```
 
-Defaults:
-
-- name: `commander`
-- role: `commander`
-- agent: `claude`
-- placement: current pane unless `--tab` is passed
-
-Examples:
+Defaults: name `commander`, agent `claude`, current pane unless `--tab`.
 
 ```bash
 node dist/cli.js commander --tab
-node dist/cli.js commander lead --agent pi
+node dist/cli.js create worker-1               # pi in a split
+node dist/cli.js create scout --type triage    # opt-in persona
 ```
 
-## Delegate to workers
+## Delegate work
 
-From a commander, create workers with default worker containment:
+`request` arms a one-shot watch back to the calling pane and injects the task with a reply trailer, in one step:
 
 ```bash
-node dist/cli.js create worker-1 --role worker
-node dist/cli.js watch worker-1 --watcher commander
-node dist/cli.js inject worker-1 --text '[courier request] <task>'
+node dist/cli.js create worker-1
+node dist/cli.js request worker-1 --text '<task>'
 ```
 
-Workers are placed together in a shared worker tab by default. Pass `--tab` only when a discrete tab is explicitly wanted.
+Keep to one open request per pane; fan out across panes rather than piling tasks into one.
 
-## Complete work
+## Respond
 
-A worker should report back through Courier, not by messaging the commander directly:
+A pane reports back through Courier. The reply trailer tells it exactly what to run — from its own pane, targeting itself, no name:
 
 ```bash
-node dist/cli.js complete worker-1 --message '<result>'
+node dist/cli.js respond --message '<result>'
 ```
 
-Courier routes completions through its queued delivery pump so fan-in results arrive as separate submissions.
+Courier routes replies through its idle-gated, per-watcher delivery pump so fan-in results arrive as separate submissions. Do not reply to a `[courier respond]` notification — that is a result for you, not a request.

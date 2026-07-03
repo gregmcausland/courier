@@ -1,30 +1,43 @@
-import type { CreateOptions, Role, WorkerType } from "./types.js";
-import { defaultRole, isKnownWorkerType, knownWorkerTypes } from "./prompts.js";
+import type { CreateOptions, WorkerType } from "./types.js";
+import { isKnownWorkerType, knownWorkerTypes } from "./prompts.js";
 
 export type Command =
   | { kind: "help" }
   | { kind: "create"; options: CreateOptions }
   | { kind: "commander"; options: CreateOptions }
+  | { kind: "request"; target: string; text: string; submitDelayMs: number; pollMs: number; awaitReply: boolean; awaitPollMs: number; awaitTimeoutMs: number }
   | { kind: "inject"; target: string; text: string; submitDelayMs: number; pollMs: number }
   | { kind: "watch"; target: string; watcher?: string }
-  | { kind: "complete"; target?: string; message: string }
+  | { kind: "respond"; target?: string; message: string }
   | { kind: "deliver"; target: string }
   | { kind: "close" | "suspend"; target: string }
   | { kind: "debug-list" };
 
 export function usage(): string {
   return `Usage:
+  courier create <NAME> [--type ${knownWorkerTypes.join("|")}] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
   courier commander [NAME] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
-  courier create <NAME> [--role commander|worker|none] [--type triage] [--agent COMMAND] [--from PANE_OR_TERMINAL_ID] [--tab] [--cwd PATH] [--focus|--no-focus]
-  courier inject <NAME_OR_PANE_OR_TERMINAL_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000]
+  courier request <TARGET_NAME_OR_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000] [--await [--await-timeout-ms 0] [--await-poll-ms 500]]
+  courier respond [TARGET_NAME_OR_ID] --message TEXT   (target defaults to the calling pane)
+  courier inject <TARGET_NAME_OR_ID> --text TEXT [--submit-delay-ms 750] [--poll-ms 1000]
   courier watch <TARGET_NAME_OR_ID> [--watcher NAME_OR_ID]
-  courier complete [TARGET_NAME_OR_ID] --message TEXT   (target defaults to the calling pane)
   courier deliver <NAME_OR_PANE_OR_TERMINAL_ID>
   courier close <NAME_OR_PANE_OR_TERMINAL_ID>
   courier suspend <NAME_OR_PANE_OR_TERMINAL_ID>
 
-Courier records created agents by name. courier commander launches a default commander named commander with Claude Code in the current pane unless --tab is passed. Worker creates are contained in a shared worker tab by default; pass --tab to open a discrete tab. Watches are one-shot awaits consumed by complete.
-Default worker agent: pi. Use --agent claude for Claude Code or --agent cursor for Cursor Agent.
+Courier is an agent-agnostic messaging layer over Herdr panes. Any pane can address any other.
+
+  request = arm a one-shot watch back to the calling pane, then inject TEXT plus a reply trailer
+            that tells the target how to respond. This is the normal way to hand off work.
+            --await instead BLOCKS until the reply lands and prints it to stdout, for headless
+            loop drivers (run it in its own driver pane; abort by closing the pane).
+  respond = deliver a reply back to whoever is watching the calling pane (or an explicit target),
+            consuming the watch. Injected by the trailer, so agents run it verbatim.
+  inject  = raw send with no watch and no trailer (fire-and-forget / manual).
+
+A pane holds at most one open request at a time: fan work out across panes, not within one.
+Roles were removed — panes are homogeneous. Attach an optional persona with --type (e.g. --type triage).
+Default agent: pi. Use --agent claude for Claude Code or --agent cursor for Cursor Agent.
 `;
 }
 
@@ -34,9 +47,10 @@ export function parse(argv: string[]): Command {
   switch (cmd) {
     case "commander": return { kind: "commander", options: parseCommanderArgs(args) };
     case "create": case "open-agent": case "agent": return { kind: "create", options: parseCreateArgs(args) };
-    case "inject": return { kind: "inject", ...parseInjectArgs(args) };
+    case "request": return { kind: "request", ...parseInjectArgs(args, true) };
+    case "inject": { const { target, text, submitDelayMs, pollMs } = parseInjectArgs(args, false); return { kind: "inject", target, text, submitDelayMs, pollMs }; }
     case "watch": return { kind: "watch", ...parseWatchArgs(args) };
-    case "complete": return { kind: "complete", ...parseCompleteArgs(args) };
+    case "respond": case "complete": return { kind: "respond", ...parseRespondArgs(args) };
     case "deliver": return { kind: "deliver", target: parseSingleTarget(args) };
     case "close": return { kind: "close", target: parseSingleTarget(args) };
     case "suspend": return { kind: "suspend", target: parseSingleTarget(args) };
@@ -56,51 +70,51 @@ function parseCommanderArgs(args: string[]): CreateOptions {
       case "--tab": tab = true; break;
       case "--cwd": tail.push("--cwd", requireValue(args.shift(), "--cwd value")); break;
       case "--focus": case "--no-focus": tail.push(arg); break;
-      case "--role": throw new Error("courier commander always uses --role commander");
+      case "--role": throw new Error("roles were removed; `commander` is just a convenience launcher (claude in the current pane)");
       case "--split": throw new Error("--split is no longer part of the Courier interface; use default placement or --tab");
       default: throw new Error(`unknown option: ${arg ?? ""}`);
     }
   }
-  return { name, from, tab, here: !tab, tail, agent, role: "commander" };
+  return { name, from, tab, here: !tab, tail, agent };
 }
 
 function parseCreateArgs(args: string[]): CreateOptions {
   const name = requireValue(args.shift(), "name");
-  let from: string | undefined; let tab = false; let agent = "pi"; let role: Role = defaultRole(name); let explicitRole: Role | undefined; let type: WorkerType | undefined; const tail: string[] = [];
+  let from: string | undefined; let tab = false; let agent = "pi"; let type: WorkerType | undefined; const tail: string[] = [];
   while (args.length > 0) {
     const arg = args.shift();
     switch (arg) {
       case "--agent": agent = requireValue(args.shift(), "--agent value"); break;
-      case "--role": { const value = requireValue(args.shift(), "--role value"); if (value !== "commander" && value !== "worker" && value !== "none") throw new Error("--role must be commander, worker, or none"); role = value; explicitRole = value; break; }
       case "--type": { const value = requireValue(args.shift(), `--type value (${knownWorkerTypes.join("|")})`); if (!isKnownWorkerType(value)) throw new Error(`--type must be one of: ${knownWorkerTypes.join(", ")}`); type = value; break; }
       case "--from": from = requireValue(args.shift(), "--from value"); break;
       case "--tab": tab = true; break;
       case "--cwd": tail.push("--cwd", requireValue(args.shift(), "--cwd value")); break;
       case "--focus": case "--no-focus": tail.push(arg); break;
-      case "--split": throw new Error("--split is no longer part of the Courier interface; use default containment or --tab");
+      case "--role": throw new Error("roles were removed; panes are homogeneous. Attach a persona with --type instead");
+      case "--split": throw new Error("--split is no longer part of the Courier interface; use default placement or --tab");
       default: throw new Error(`unknown option: ${arg ?? ""}`);
     }
   }
-  if (type) {
-    if (explicitRole && explicitRole !== "worker") throw new Error("--type requires --role worker; remove the conflicting --role or use --role worker");
-    role = "worker";
-  }
-  return { name, from, tab, tail, agent, role, type };
+  return { name, from, tab, tail, agent, type };
 }
 
-function parseInjectArgs(args: string[]): { target: string; text: string; submitDelayMs: number; pollMs: number } {
+function parseInjectArgs(args: string[], allowAwait: boolean): { target: string; text: string; submitDelayMs: number; pollMs: number; awaitReply: boolean; awaitPollMs: number; awaitTimeoutMs: number } {
   const target = requireValue(args.shift(), "name or id"); let text: string | undefined; let submitDelayMs = 750; let pollMs = 1000;
+  let awaitReply = false; let awaitPollMs = 500; let awaitTimeoutMs = 0;
   while (args.length > 0) {
     const arg = args.shift();
     switch (arg) {
       case "--text": text = requireValue(args.shift(), "--text value"); break;
       case "--submit-delay-ms": submitDelayMs = Number(requireValue(args.shift(), "--submit-delay-ms value")); break;
       case "--poll-ms": pollMs = Number(requireValue(args.shift(), "--poll-ms value")); break;
+      case "--await": if (!allowAwait) throw new Error("--await is only valid on `request`"); awaitReply = true; break;
+      case "--await-poll-ms": if (!allowAwait) throw new Error("--await-poll-ms is only valid on `request`"); awaitPollMs = Number(requireValue(args.shift(), "--await-poll-ms value")); break;
+      case "--await-timeout-ms": if (!allowAwait) throw new Error("--await-timeout-ms is only valid on `request`"); awaitTimeoutMs = Number(requireValue(args.shift(), "--await-timeout-ms value")); break;
       default: throw new Error(`unknown option: ${arg ?? ""}`);
     }
   }
   if (!text) throw new Error("missing --text");
-  return { target, text, submitDelayMs, pollMs };
+  return { target, text, submitDelayMs, pollMs, awaitReply, awaitPollMs, awaitTimeoutMs };
 }
 
 function parseWatchArgs(args: string[]): { target: string; watcher?: string } {
@@ -109,9 +123,9 @@ function parseWatchArgs(args: string[]): { target: string; watcher?: string } {
   return { target, watcher };
 }
 
-function parseCompleteArgs(args: string[]): { target?: string; message: string } {
+function parseRespondArgs(args: string[]): { target?: string; message: string } {
   // Target is optional and defaults to the calling pane. A leading positional
-  // (not starting with --) is treated as an explicit completer.
+  // (not starting with --) is treated as an explicit responder.
   let target: string | undefined; let message: string | undefined;
   if (args[0] && !args[0].startsWith("--")) target = args.shift();
   while (args.length > 0) { const arg = args.shift(); if (arg === "--message") message = requireValue(args.shift(), "--message value"); else throw new Error(`unknown option: ${arg ?? ""}`); }

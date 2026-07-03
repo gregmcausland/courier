@@ -2,8 +2,9 @@ import type { CreateOptions, CreateResult, Pane } from "./types.js";
 import { DeliveryPump } from "./delivery.js";
 import { HerdrAdapter } from "./herdr.js";
 import { PlacementPlanner } from "./placement.js";
-import { agentCommand, rolePrompt } from "./prompts.js";
+import { agentCommand, personaPrompt, requestTrailer } from "./prompts.js";
 import { CourierStore } from "./store.js";
+import { makeAwaitWatcher, sleep } from "./util.js";
 
 export class CourierRuntime {
   readonly delivery: DeliveryPump;
@@ -11,7 +12,7 @@ export class CourierRuntime {
 
   constructor(readonly herdr = new HerdrAdapter(), readonly store = new CourierStore()) {
     this.delivery = new DeliveryPump(herdr, store, (target) => this.resolveTarget(target));
-    this.placement = new PlacementPlanner(herdr, store);
+    this.placement = new PlacementPlanner(herdr);
   }
 
   resolveTarget(target: string): Pane | undefined {
@@ -51,13 +52,59 @@ export class CourierRuntime {
     if (!pane.pane_id || !pane.terminal_id) throw new Error("herdr create did not return pane_id and terminal_id");
 
     this.herdr.renamePane(pane.pane_id, opts.name);
-    const promptPath = this.store.writePromptFile(opts.name, rolePrompt(opts.role, opts.name, opts.type));
+    // Courier-awareness is injected at request time via the trailer, not baked
+    // into the agent prompt. A prompt file is only written for an opt-in persona.
+    const promptPath = opts.type ? this.store.writePromptFile(opts.name, personaPrompt(opts.type)) : undefined;
     this.herdr.runInPane(pane.pane_id, agentCommand(opts.agent, opts.name, promptPath));
     this.herdr.renameAgent(pane.terminal_id, opts.name);
 
     const settledPane = this.herdr.waitForAgentSession(pane.terminal_id) ?? pane;
-    this.store.addAgent({ name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, role: opts.role, type: opts.type, agentSession: settledPane.agent_session, createdAt: new Date().toISOString() });
-    return { name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, role: opts.role, type: opts.type, agentSession: settledPane.agent_session };
+    this.store.addAgent({ name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, type: opts.type, agentSession: settledPane.agent_session, createdAt: new Date().toISOString() });
+    return { name: opts.name, terminalId: pane.terminal_id, paneId: settledPane.pane_id, agent: opts.agent, type: opts.type, agentSession: settledPane.agent_session };
+  }
+
+  // One-shot handoff: arm a watch back to the calling pane, then inject the task
+  // plus a reply trailer so the target knows to answer with `courier respond`.
+  // Deliberately does NOT run the late-completion recovery that `watch` does — a
+  // request opens a fresh thread, so it must not pick up a stale buffered reply.
+  request(target: string, text: string, submitDelayMs?: number, pollMs?: number): { requested: string; watcher: string; mode: "once" } {
+    const targetTerminal = this.terminalIdFor(target);
+    const watcherTerminal = this.selfTerminal();
+    this.store.registerWatch(targetTerminal, watcherTerminal);
+    this.delivery.injectText(target, `${text}\n\n${requestTrailer()}`, submitDelayMs, pollMs);
+    return { requested: targetTerminal, watcher: watcherTerminal, mode: "once" };
+  }
+
+  // Synchronous handoff for headless loop drivers: inject the task, then block in
+  // this process until the target's `respond` lands, returning the reply. Uses a
+  // synthetic (non-pane) watcher so nothing injects the result — we poll the
+  // durable delivery queue directly. Intended to run in its own driver pane, not
+  // an interactive session (it blocks). awaitTimeoutMs <= 0 waits indefinitely;
+  // abort by closing the driver pane.
+  requestAwait(target: string, text: string, opts: { submitDelayMs?: number; pollMs?: number; awaitPollMs?: number; awaitTimeoutMs?: number } = {}): { from: string; message: string } {
+    const targetTerminal = this.terminalIdFor(target);
+    const watcher = makeAwaitWatcher();
+    this.store.registerWatch(targetTerminal, watcher);
+    this.delivery.injectText(target, `${text}\n\n${requestTrailer()}`, opts.submitDelayMs, opts.pollMs);
+    const awaitPollMs = opts.awaitPollMs ?? 500;
+    const timeoutMs = opts.awaitTimeoutMs ?? 0;
+    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
+    try {
+      for (;;) {
+        const next = this.store.readDeliveries(watcher)[0];
+        if (next) {
+          this.store.removeDelivery(next);
+          return { from: next.from, message: next.message ?? next.text };
+        }
+        if (Date.now() >= deadline) throw new Error(`timed out after ${timeoutMs}ms waiting for a reply from ${target}`);
+        sleep(awaitPollMs);
+      }
+    } finally {
+      // Drop our synthetic watch and any leftover queued reply (e.g. one that
+      // raced in as we timed out) so nothing lingers under the await id.
+      this.store.unregisterWatch(targetTerminal, watcher);
+      for (const leftover of this.store.readDeliveries(watcher)) this.store.removeDelivery(leftover);
+    }
   }
 
   inject(target: string, text: string, submitDelayMs?: number, pollMs?: number): void { this.delivery.injectText(target, text, submitDelayMs, pollMs); }
@@ -77,7 +124,7 @@ export class CourierRuntime {
     return { awaiting: targetTerminal, watcher: watcherTerminal, mode: "once", recovered };
   }
 
-  complete(target: string | undefined, message: string): { target: string; queued: number; delivered: number; consumed: number; buffered: number } {
+  respond(target: string | undefined, message: string): { target: string; queued: number; delivered: number; consumed: number; buffered: number } {
     const targetTerminal = target ? this.terminalIdFor(target) : this.selfTerminal();
     const watchers = this.store.consumeWatchers(targetTerminal);
     const createdAt = new Date().toISOString();
@@ -118,7 +165,6 @@ export class CourierRuntime {
         currentPaneId: current?.pane_id ?? null,
         status: current?.agent_status ?? "gone",
         agent: current ? record.agent : null,
-        role: record.role ?? null,
         type: record.type ?? null,
         agentSession: current?.agent_session ?? record.agentSession ?? null,
         closedAt: record.closedAt ?? null,

@@ -18,9 +18,15 @@ try {
   switch (command.kind) {
     case "create":
     case "commander": printJson(runtime.create(command.options)); break;
+    case "request":
+      if (command.awaitReply) {
+        const reply = runtime.requestAwait(command.target, command.text, { submitDelayMs: command.submitDelayMs, pollMs: command.pollMs, awaitPollMs: command.awaitPollMs, awaitTimeoutMs: command.awaitTimeoutMs });
+        console.log(reply.message);
+      } else printJson(runtime.request(command.target, command.text, command.submitDelayMs, command.pollMs));
+      break;
     case "inject": runtime.inject(command.target, command.text, command.submitDelayMs, command.pollMs); break;
     case "watch": printJson(runtime.watch(command.target, command.watcher)); break;
-    case "complete": printJson(runtime.complete(command.target, command.message)); break;
+    case "respond": printJson(runtime.respond(command.target, command.message)); break;
     case "deliver": printJson(runtime.deliver(command.target)); break;
     case "close": printJson(runtime.closeOrSuspend(command.target, "close")); break;
     case "suspend": printJson(runtime.closeOrSuspend(command.target, "suspend")); break;

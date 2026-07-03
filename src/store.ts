@@ -43,6 +43,14 @@ export class CourierStore {
     });
   }
 
+  unregisterWatch(targetTerminal: string, watcherTerminal: string): void {
+    this.updateState((state) => {
+      const remaining = (state.watches[targetTerminal] ?? []).filter((watcher) => watcher !== watcherTerminal);
+      if (remaining.length > 0) state.watches[targetTerminal] = remaining;
+      else delete state.watches[targetTerminal];
+    });
+  }
+
   consumeWatchers(targetTerminal: string): string[] {
     let watchers: string[] = [];
     this.updateState((state) => { watchers = state.watches[targetTerminal] ?? []; delete state.watches[targetTerminal]; });
